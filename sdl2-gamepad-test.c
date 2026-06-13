@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
 
     printf("\n");
     printf("Press buttons/axes on your gamepad to test.\n");
-    printf("Press Ctrl+C or close the window to exit.\n\n");
+    printf("Press Enter, Escape, or close the window to finish.\n\n");
 
     SDL_Window *win = SDL_CreateWindow(
         "SDL2 Gamepad Test",
@@ -86,6 +86,8 @@ int main(int argc, char *argv[])
     if (!win) {
         fprintf(stderr, "WARN: could not create window: %s\n", SDL_GetError());
         fprintf(stderr, "Continuing without window...\n");
+    } else {
+        SDL_RaiseWindow(win);
     }
 
     SDL_GameController *active_ctrl = NULL;
@@ -143,7 +145,9 @@ int main(int argc, char *argv[])
                 }
                 break;
             case SDL_KEYDOWN:
-                if (e.key.keysym.sym == SDLK_ESCAPE)
+                if (e.key.keysym.sym == SDLK_ESCAPE ||
+                    e.key.keysym.sym == SDLK_RETURN ||
+                    e.key.keysym.sym == SDLK_KP_ENTER)
                     running = 0;
                 break;
             }
