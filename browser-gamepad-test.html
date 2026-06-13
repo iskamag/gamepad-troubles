@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gamepad Test</title>
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { font-family: monospace; background: #252530; color: #c8c8d0; padding: 2rem 1rem;
+         max-width: 640px; margin: 0 auto; }
+  h1 { margin-bottom: 1rem; font-size: 1.2rem; color: #e0e0e8; text-align: center; }
+  .status { padding: .6rem 1rem; margin-bottom: 1rem; border-radius: 6px; text-align: center;
+            font-size: .85rem; }
+  .status.waiting { background: #2e2e38; color: #888; }
+  .status.connected { background: #2a3a2a; color: #8cc88c; }
+  .card { background: #2a2a34; border: 1px solid #38384a; border-radius: 8px;
+          padding: 1rem; margin-bottom: .75rem; }
+  .card h2 { font-size: .9rem; margin-bottom: .6rem; color: #a0a0b0; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+          gap: 6px; margin-top: .5rem; }
+  .btn { padding: .4rem; text-align: center; border-radius: 4px;
+         background: #33333e; border: 1px solid #44444f; font-size: .75rem;
+         color: #999; transition: background 100ms, border-color 100ms; }
+  .btn.pressed { background: #4a5a7a; border-color: #5a6a8a; color: #e0e8f0; }
+  .axis-row { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; }
+  .axis-bar-bg { flex: 1; height: 14px; background: #33333e; border-radius: 4px;
+                 position: relative; overflow: hidden; }
+  .axis-bar { position: absolute; top: 0; height: 100%; background: #4a5a7a;
+              border-radius: 4px; transition: left 50ms, width 50ms; }
+  .axis-label { width: 40px; font-size: .75rem; color: #888; }
+  .axis-value { width: 50px; font-size: .75rem; text-align: right; color: #888; }
+  pre { background: #222230; padding: .6rem; border-radius: 6px; font-size: .7rem;
+        max-height: 200px; overflow-y: auto; margin-top: .5rem; color: #999; }
+</style>
+</head>
+<body>
+<h1>Browser Gamepad Test</h1>
+<div id="status" class="status waiting">Waiting for gamepad... connect one and press any button.</div>
+<div id="info" class="card" style="display:none">
+  <h2>Controller Info</h2>
+  <div id="info-text"></div>
+</div>
+<div id="buttons-card" class="card" style="display:none">
+  <h2>Buttons</h2>
+  <div id="buttons" class="grid"></div>
+</div>
+<div id="axes-card" class="card" style="display:none">
+  <h2>Axes</h2>
+  <div id="axes"></div>
+</div>
+<div id="log-card" class="card">
+  <h2>Event Log</h2>
+  <pre id="log"></pre>
+</div>
+
+<script>
+const BUTTON_NAMES = [
+  'A','B','X','Y','LB','RB','LT','RT','Back','Start',
+  'L3','R3','Up','Down','Left','Right','Home'
+];
+const AXIS_NAMES = ['LX','LY','RX','RY','LT','RT'];
+
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const infoEl = document.getElementById('info');
+const infoTextEl = document.getElementById('info-text');
+const btnsCard = document.getElementById('buttons-card');
+const axesCard = document.getElementById('axes-card');
+const btnsEl = document.getElementById('buttons');
+const axesEl = document.getElementById('axes');
+
+let gpState = { buttons: [], axes: [] };
+let logLines = [];
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString('en-US', {hour12:false});
+  logLines.push(`[${t}] ${msg}`);
+  if (logLines.length > 200) logLines.shift();
+  logEl.textContent = logLines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function buildUI(gp) {
+  btnsEl.innerHTML = '';
+  axesEl.innerHTML = '';
+  gpState.buttons = [];
+  gpState.axes = [];
+
+  for (let i = 0; i < gp.buttons.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'btn';
+    d.textContent = BUTTON_NAMES[i] || `B${i}`;
+    d.id = `btn-${i}`;
+    btnsEl.appendChild(d);
+    gpState.buttons.push(false);
+  }
+
+  for (let i = 0; i < gp.axes.length; i++) {
+    const row = document.createElement('div');
+    row.className = 'axis-row';
+    row.innerHTML = `<span class="axis-label">${AXIS_NAMES[i] || `A${i}`}</span>
+      <div class="axis-bar-bg"><div class="axis-bar" id="axis-${i}"></div></div>
+      <span class="axis-value" id="axis-val-${i}">0.00</span>`;
+    axesEl.appendChild(row);
+    gpState.axes.push(0);
+  }
+
+  infoTextEl.textContent =
+    `ID: ${gp.id}\nIndex: ${gp.index}\nMapping: ${gp.mapping || 'none'}\n` +
+    `Buttons: ${gp.buttons.length}\nAxes: ${gp.axes.length}\n` +
+    `Vibration: ${gp.vibrationActuator ? gp.vibrationActuator.type : 'no'}`;
+  infoEl.style.display = '';
+  btnsCard.style.display = '';
+  axesCard.style.display = '';
+  statusEl.className = 'status connected';
+  statusEl.textContent = `Connected: ${gp.id}`;
+}
+
+function poll() {
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (let i = 0; i < gamepads.length; i++) {
+    if (gamepads[i]) { gp = gamepads[i]; break; }
+  }
+  if (!gp) { requestAnimationFrame(poll); return; }
+
+  if (gpState.buttons.length !== gp.buttons.length) buildUI(gp);
+
+  for (let i = 0; i < gp.buttons.length; i++) {
+    const pressed = gp.buttons[i].pressed;
+    const el = document.getElementById(`btn-${i}`);
+    if (el) el.className = pressed ? 'btn pressed' : 'btn';
+    if (pressed !== gpState.buttons[i]) {
+      log(`${pressed ? 'DOWN' : 'UP  '} ${BUTTON_NAMES[i] || 'B'+i}` +
+          (gp.buttons[i].value !== undefined && pressed
+           ? ` (value: ${gp.buttons[i].value.toFixed(2)})` : ''));
+      gpState.buttons[i] = pressed;
+    }
+  }
+
+  for (let i = 0; i < gp.axes.length; i++) {
+    const v = gp.axes[i];
+    const bar = document.getElementById(`axis-${i}`);
+    const val = document.getElementById(`axis-val-${i}`);
+    if (bar) {
+      const center = 50;
+      const offset = (v * 50);
+      if (offset >= 0) {
+        bar.style.left = center + '%';
+        bar.style.width = offset + '%';
+      } else {
+        bar.style.left = (center + offset) + '%';
+        bar.style.width = (-offset) + '%';
+      }
+    }
+    if (val) val.textContent = v.toFixed(2);
+    if (Math.abs(v - gpState.axes[i]) > 0.05) {
+      log(`AXIS ${AXIS_NAMES[i] || 'A'+i} = ${v.toFixed(3)}`);
+      gpState.axes[i] = v;
+    }
+  }
+
+  requestAnimationFrame(poll);
+}
+
+window.addEventListener('gamepadconnected', (e) => {
+  log(`CONNECTED: ${e.gamepad.id} (index ${e.gamepad.index})`);
+  buildUI(e.gamepad);
+});
+
+window.addEventListener('gamepaddisconnected', (e) => {
+  log(`DISCONNECTED: ${e.gamepad.id}`);
+  statusEl.className = 'status waiting';
+  statusEl.textContent = 'Waiting for gamepad... connect one and press any button.';
+  infoEl.style.display = 'none';
+  btnsCard.style.display = 'none';
+  axesCard.style.display = 'none';
+});
+
+log('Browser Gamepad Test ready.');
+log('Connect a gamepad and press any button to activate.');
+log(`User-Agent: ${navigator.userAgent}`);
+poll();
+</script>
+</body>
+</html>
